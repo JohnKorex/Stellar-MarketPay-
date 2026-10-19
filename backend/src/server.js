@@ -18,6 +18,9 @@ const rateLimit = require("express-rate-limit");
 const { WebSocketServer } = require("ws");
 const nodemailer = require("nodemailer");
 const jwt = require("jsonwebtoken");
+const { createBullBoard } = require("@bull-board/api");
+const { BullAdapter } = require("@bull-board/api/bullAdapter");
+const { ExpressAdapter } = require("@bull-board/express");
  
 const jobRoutes = require("./routes/jobs");
 const applicationRoutes = require("./routes/applications");
@@ -33,6 +36,8 @@ const contributorRoutes = require("./routes/contributors");
 const verificationRoutes = require("./routes/verification");
 const nftRoutes         = require("./routes/nft");
 const aiScorerRoutes    = require("./routes/aiScorer");
+const { verifyJWT, requireAdminRole, requireAdmin2FA } = require("./middleware/auth");
+const { emailQueue, auditQueue, linkVerificationQueue } = require("./utils/queue");
  
 const gasEstimatorRoutes = require("./routes/gasEstimator");
 const transactionRoutes  = require("./routes/transactions");
@@ -92,6 +97,13 @@ require("./workers/auditWorker");
 const app  = express();
 const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
+
+const bullBoardAdapter = new ExpressAdapter();
+bullBoardAdapter.setBasePath("/api/admin/queues");
+createBullBoard({
+  queues: [new BullAdapter(emailQueue), new BullAdapter(auditQueue), new BullAdapter(linkVerificationQueue)],
+  serverAdapter: bullBoardAdapter,
+});
 const WS_OPEN = 1;
  
 const realtimeClients = new Set();
@@ -251,6 +263,9 @@ app.use("/api/search",            searchRoutes);
 app.use("/ping",                  pingRoutes);
 app.use("/api/ping",              pingRoutes);
 app.use("/api/admin/2fa",         admin2faRoutes);
+// Bull Board exposes queue contents and controls; keep it behind the same
+// JWT, admin-role, and second-factor checks as the other admin routes.
+app.use("/api/admin/queues", verifyJWT, requireAdminRole, requireAdmin2FA, bullBoardAdapter.getRouter());
 app.use("/api/admin",             adminRoutes);
 app.use("/api/assessments",       assessmentRoutes);
 app.use("/api/audit",             auditRoutes);
